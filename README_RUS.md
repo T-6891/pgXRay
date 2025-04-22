@@ -3,7 +3,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)
-![Version](https://img.shields.io/badge/Version-3.1.0-blue.svg)
+![Version](https://img.shields.io/badge/Version-1.3.0-blue.svg)
 
 pgXRay - это мощный инструмент для комплексного аудита и документирования PostgreSQL баз данных. Проект создан для автоматизации процесса аудита структуры базы данных и генерации документации, включая визуальные ER-диаграммы.
 
