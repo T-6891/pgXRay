@@ -3,7 +3,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)
-![Version](https://img.shields.io/badge/Version-1.3.0-blue.svg)
+![Version](https://img.shields.io/badge/Version-2.0.1-blue.svg)
 
 pgXRay is a powerful tool for comprehensive auditing and documentation of PostgreSQL databases. This project was created to automate the process of auditing database structures and generating documentation, including visual ER diagrams.
 
@@ -18,6 +18,11 @@ pgXRay is a powerful tool for comprehensive auditing and documentation of Postgr
   - Sample data from each table (up to SAMPLE_LIMIT rows)
   - Row count estimates and table size information
   
+- **Views Analysis**:
+  - Views and materialized views with dependencies
+  - Columns and definition details
+  - Sample data and size information
+  
 - **Code Examination**:
   - Complete function definitions
   - Triggers and their implementations
@@ -25,7 +30,8 @@ pgXRay is a powerful tool for comprehensive auditing and documentation of Postgr
 - **Visualization**:
   - ER diagrams in DOT and PNG formats
   - HTML tables in diagram nodes
-  - XLabel edge annotations for relationships
+  - Relationship indicators on edges
+  - Clear distinction between tables and views
   
 - **Reporting**:
   - Detailed Markdown report
@@ -97,27 +103,41 @@ python pgXRay.py --conn "postgresql://user:password@host:port/database" \
 
 Running the script will generate:
 
-1. **ER diagram** in DOT and PNG formats visualizing table relationships
+1. **ER diagram** in DOT and PNG formats visualizing table and view relationships
 2. **Markdown report** including:
    - General database information (PostgreSQL version, DB size)
    - Table structures with data types
    - Sample data from each table
+   - View definitions and dependencies
    - Complete function definitions
    - Trigger definitions
 
+## 🏗️ Project Architecture
+
+The project follows a modular architecture with the following components:
+
+1. **pgxray.py** - Main entry point, handles command-line arguments and workflow orchestration
+2. **db_connector.py** - Manages PostgreSQL database connections and query execution
+3. **data_extractor.py** - Extracts metadata and sample data from the database
+4. **er_diagram_generator.py** - Generates ER diagrams in DOT and PNG formats
+5. **report_generator.py** - Creates comprehensive Markdown reports
+
 ## 🛠️ Configuration
 
-Main settings are located at the top of the script:
+Main settings are located at the top of the `pgxray.py` script:
 
 ```python
-# =====================
 # Configuration
-# =====================
-SAMPLE_LIMIT      = 10                  # number of rows to sample
-DOT_FILE          = 'er_diagram.dot'    # .dot file name
-PNG_FILE          = 'er_diagram.png'    # .png file name
+DOT_FILE = 'er_diagram.dot'        # DOT filename
+PNG_FILE = 'er_diagram.png'        # PNG filename
 DEFAULT_MD_REPORT = 'audit_report.md'
-# =====================
+```
+
+Sample limit configuration is in `data_extractor.py`:
+
+```python
+# Number of rows to sample from each table
+SAMPLE_LIMIT = 10
 ```
 
 ## 🤝 Contributing
@@ -142,8 +162,11 @@ E-mail: master@t-brain.ru
 
 ## 📌 Roadmap
 
-- [ ] Analysis of views and materialized views
+- [ ] Schema comparison functionality
+- [ ] Interactive web-based diagrams
+- [ ] Database structure versioning
+- [ ] Performance insights and index recommendations
+- [ ] Extended security audit capabilities
 - [ ] HTML export format
-- [ ] Interactive diagrams
 - [ ] Database structure comparison
 - [ ] Optimization for large databases
