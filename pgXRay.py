@@ -4,7 +4,7 @@
 pgXRay
 -----------------------------------------------------------------
 
-Version: 3.2.1
+Version: 1.3.0
 
 Purpose
     Advanced PostgreSQL database audit:
@@ -55,49 +55,31 @@ from typing import Dict, List, Any, Tuple
 import psycopg2
 import psycopg2.extras
 
-#############################################
-# Модуль работы с базой данных
-#############################################
-
 class DatabaseConnector:
-    """Работа с подключением к PostgreSQL и выполнение запросов"""
-    
     def __init__(self, conn_str: str):
-        """Инициализация с строкой подключения"""
         self.conn = psycopg2.connect(conn_str)
         self.cur = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
     def fetch_all(self, sql: str, params=None) -> List[Dict]:
-        """Выполнение запроса с возвратом всех результатов"""
         self.cur.execute(sql, params or ())
         return self.cur.fetchall()
     
     def fetch_one(self, sql: str, params=None) -> Dict:
-        """Выполнение запроса с возвратом одной строки"""
         self.cur.execute(sql, params or ())
         return self.cur.fetchone()
     
     def close(self):
-        """Закрытие соединения"""
         if self.cur:
             self.cur.close()
         if self.conn:
             self.conn.close()
 
 
-#############################################
-# Модуль извлечения данных
-#############################################
-
 class DataExtractor:
-    """Извлечение всех необходимых данных из PostgreSQL"""
-    
     def __init__(self, db: DatabaseConnector):
-        """Инициализация с подключением к БД"""
         self.db = db
     
     def get_database_info(self) -> Dict:
-        """Получение общей информации о базе данных"""
         data = {}
         
         data['version'] = self.db.fetch_one("SHOW server_version;")['server_version']
@@ -109,7 +91,6 @@ class DataExtractor:
         return data
     
     def get_tables(self) -> List[Dict]:
-        """Получение списка таблиц с информацией о столбцах"""
         tables = self.db.fetch_all("""
             SELECT schemaname AS schema, tablename AS name
             FROM pg_catalog.pg_tables
@@ -117,7 +98,6 @@ class DataExtractor:
             ORDER BY schema, name;
         """)
         
-        # Получаем дополнительную информацию для каждой таблицы
         for tbl in tables:
             sch, nm = tbl['schema'], tbl['name']
             tbl['row_estimate'] = self.db.fetch_one(
@@ -127,7 +107,6 @@ class DataExtractor:
                 f"SELECT pg_size_pretty(pg_total_relation_size('{sch}.{nm}'));"
             )['pg_size_pretty']
             
-            # Получаем информацию о столбцах
             tbl['columns'] = self.db.fetch_all("""
                 SELECT 
                     c.column_name, c.data_type,
@@ -146,7 +125,6 @@ class DataExtractor:
                 ORDER BY c.ordinal_position;
             """, (sch, nm, sch, nm))
             
-            # Получаем информацию о внешних ключах
             tbl['foreign_keys'] = self.db.fetch_all("""
                 SELECT
                     kcu.column_name,
@@ -164,7 +142,6 @@ class DataExtractor:
                   AND tc.table_name = %s;
             """, (sch, nm))
             
-            # Обновляем атрибуты столбцов с информацией о внешних ключах
             for col in tbl['columns']:
                 col['is_foreign_key'] = False
                 col['references'] = None
@@ -182,7 +159,6 @@ class DataExtractor:
         return tables
     
     def get_samples(self, tables: List[Dict]) -> Dict[str, List[Dict]]:
-        """Получение образцов данных для всех таблиц"""
         samples = {}
         for tbl in tables:
             key = f"{tbl['schema']}.{tbl['name']}"
@@ -194,7 +170,6 @@ class DataExtractor:
         return samples
     
     def get_foreign_keys(self) -> List[Dict]:
-        """Получение всех внешних ключей БД"""
         return self.db.fetch_all("""
             SELECT 
                 kcu.table_schema, kcu.table_name,
@@ -212,7 +187,6 @@ class DataExtractor:
         """)
     
     def get_functions(self) -> List[Dict]:
-        """Получение всех пользовательских функций"""
         return self.db.fetch_all("""
             SELECT n.nspname AS schema, p.proname AS name,
                    pg_get_function_arguments(p.oid) AS args,
@@ -225,7 +199,6 @@ class DataExtractor:
         """)
     
     def get_triggers(self) -> List[Dict]:
-        """Получение всех триггеров"""
         return self.db.fetch_all("""
             SELECT trigger_name, event_object_schema, event_object_table, action_statement
             FROM information_schema.triggers
@@ -233,7 +206,6 @@ class DataExtractor:
         """)
     
     def get_all_data(self) -> Dict:
-        """Получение всех данных для отчёта"""
         data = self.get_database_info()
         data['tables'] = self.get_tables()
         data['samples'] = self.get_samples(data['tables'])
@@ -243,91 +215,98 @@ class DataExtractor:
         return data
 
 
-#############################################
-# Модуль генерации ER-диаграммы
-#############################################
-
 class ERDiagramGenerator:
-    """Класс для генерации ER-диаграмм в формате DOT и PNG"""
-    
     def __init__(self, tables: List[Dict], foreign_keys: List[Dict]):
-        """Инициализация с таблицами и внешними ключами"""
         self.tables = tables
         self.foreign_keys = foreign_keys
+        self.schemas = set(tbl['schema'] for tbl in tables)
     
-    def format_columns_for_record(self, columns: List[Dict]) -> str:
-        """Форматирование списка столбцов для record-стиля"""
+    def get_column_details(self, columns: List[Dict]) -> List[str]:
+        """Получение отформатированных деталей столбцов для HTML-таблицы"""
         result = []
+        
         for col in columns:
-            prefix = ""
-            if col['is_primary_key']:
-                prefix = "+"  # Обозначаем первичный ключ +
-            elif col['is_foreign_key']:
-                prefix = "#"  # Обозначаем внешний ключ #
-            else:
-                prefix = "~"  # Обозначаем обычные атрибуты ~
+            pk_marker = '<TD BGCOLOR="#E0FFE0"><B>PK</B></TD>' if col['is_primary_key'] else '<TD></TD>'
+            fk_marker = '<TD BGCOLOR="#E0E0FF"><B>FK</B></TD>' if col['is_foreign_key'] else '<TD></TD>'
             
-            suffix = ""
-            if col['is_primary_key']:
-                suffix = " (PK)"
-            if col['is_foreign_key']:
-                suffix = " (FK)"
-                
-            result.append(f"{prefix} {col['column_name']}{suffix}: {col['data_type']}")
+            # Форматирование строки с типом столбца
+            col_name = col['column_name']
+            data_type = col['data_type']
             
-        return "\\n".join(result)
+            # Создание строки HTML-таблицы для данного столбца
+            result.append(f'<TR><TD ALIGN="LEFT">{col_name}</TD><TD ALIGN="LEFT">{data_type}</TD>{pk_marker}{fk_marker}</TR>')
+        
+        return result
 
-    def determine_cardinality(self, fk: Dict) -> Tuple[str, str]:
-        """Определение кардинальности для отношений"""
-        # По умолчанию для отношений БД используем "1" для PK и "N" для FK
-        # так как обычно внешний ключ может содержать множество ссылок
-        return "1", "N"
-    
+    def generate_table_html(self, table: Dict) -> str:
+        """Создает HTML-представление таблицы для использования в Graphviz"""
+        table_name = table['name']
+        column_details = self.get_column_details(table['columns'])
+        column_rows = "\n".join(column_details)
+        
+        html = f'''<
+            <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+                <TR>
+                    <TD COLSPAN="4" BGCOLOR="#4D7A97"><FONT COLOR="white"><B>{table_name}</B></FONT></TD>
+                </TR>
+                <TR>
+                    <TD BGCOLOR="#EEEEFF"><B>Column</B></TD>
+                    <TD BGCOLOR="#EEEEFF"><B>Type</B></TD>
+                    <TD BGCOLOR="#EEEEFF"><B>PK</B></TD>
+                    <TD BGCOLOR="#EEEEFF"><B>FK</B></TD>
+                </TR>
+                {column_rows}
+            </TABLE>
+        >'''
+        return html
+
     def generate_er_dot(self, dot_path: str):
-        """Генерирует DOT-файл в стиле record для ER-диаграммы"""
+        """Генерирует улучшенный DOT-файл для ER-диаграммы с использованием HTML-таблиц"""
         with open(dot_path, 'w', encoding='utf-8') as f:
             f.write('digraph ER {\n')
-            f.write('  graph [rankdir=LR, splines=ortho, bgcolor="white"];\n')
-            f.write('  node [shape=record, style=rounded, fontname="Helvetica", fontsize=10];\n')
-            f.write('  edge [dir=both, arrowhead=normal, arrowtail=none, fontsize=9, fontname="Helvetica"];\n\n')
+            f.write('  graph [rankdir=LR, fontname="Helvetica", fontsize=12, pad="0.5", nodesep="0.5", ranksep="1.5"];\n')
+            f.write('  node [shape=plain, fontname="Helvetica", fontsize=10];\n')
+            f.write('  edge [arrowhead=crow, arrowtail=none, dir=both, fontname="Helvetica", fontsize=9, penwidth=1.0];\n\n')
             
-            # Генерация узлов таблиц с атрибутами в стиле record
-            for tbl in self.tables:
-                full = f"{tbl['schema']}.{tbl['name']}"
-                columns_formatted = self.format_columns_for_record(tbl['columns'])
+            # Создаем кластеры (подграфы) для каждой схемы
+            for schema in sorted(self.schemas):
+                f.write(f'  subgraph cluster_{schema} {{\n')
+                f.write(f'    label="Schema: {schema}";\n')
+                f.write('    style="filled";\n')
+                f.write('    color="#EEEEEE";\n')
+                f.write('    fontname="Helvetica-Bold";\n')
+                f.write('    fontsize=12;\n')
                 
-                # Разделяем имя сущности и атрибуты вертикальной линией
-                label = f"{full}|{columns_formatted}"
+                # Добавляем таблицы для текущей схемы
+                for tbl in self.tables:
+                    if tbl['schema'] == schema:
+                        full_name = f"{tbl['schema']}.{tbl['name']}"
+                        table_html = self.generate_table_html(tbl)
+                        f.write(f'    "{full_name}" [label={table_html}];\n')
                 
-                # Используем формат записи для разделения частей
-                f.write(f'  "{full}" [label="{{{label}}}"];\n')
+                f.write('  }\n\n')
             
-            f.write('\n')
-            
-            # Генерация рёбер отношений с кардинальностью
+            # Добавляем ребра (связи между таблицами)
             for fk in self.foreign_keys:
                 src = f"{fk['table_schema']}.{fk['table_name']}"
                 dst = f"{fk['foreign_table_schema']}.{fk['foreign_table_name']}"
-                relation_name = fk['constraint_name']
                 
-                # Определяем кардинальность
-                tail_card, head_card = self.determine_cardinality(fk)
+                # Создаем метку для связи
+                label = f"{fk['constraint_name']}"
                 
-                # Создаём ребро с кардинальностью и именем отношения
-                # Используем xlabel вместо label для совместимости с ортогональными линиями
-                f.write(
-                    f'  "{src}" -> "{dst}" [taillabel="{tail_card}", '
-                    f'headlabel="{head_card}", xlabel="{relation_name}"];\n'
-                )
+                # Добавляем ребро с улучшенным стилем и обозначением кардинальности
+                f.write(f'  "{src}" -> "{dst}" [label="{label}", fontname="Helvetica", fontsize=8, ')
+                f.write('color="#5D8AA8", style="solid", arrowhead=normal, arrowtail=crow];\n')
             
             f.write('}\n')
         
         print(f"[+] DOT ER diagram generated: {dot_path}")
-    
+
     def render_png(self, dot_path: str, png_path: str):
-        """Преобразует DOT-файл в PNG с помощью Graphviz"""
+        """Преобразует DOT-файл в PNG с помощью Graphviz с улучшенными параметрами отрисовки"""
         try:
-            subprocess.check_call(['dot', '-Tpng', dot_path, '-o', png_path])
+            # Используем улучшенный рендеринг с более высоким DPI
+            subprocess.check_call(['dot', '-Tpng', '-Gdpi=300', dot_path, '-o', png_path])
             print(f"[+] PNG ER diagram generated: {png_path}")
         except FileNotFoundError:
             print("Error: Graphviz 'dot' not found. Install with: sudo apt install graphviz", file=os.sys.stderr)
@@ -335,22 +314,13 @@ class ERDiagramGenerator:
             print(f"PNG generation error: {e}", file=os.sys.stderr)
 
 
-#############################################
-# Модуль генерации отчёта
-#############################################
-
 class ReportGenerator:
-    """Класс для генерации отчётов в формате Markdown"""
-    
     def __init__(self, data: Dict):
-        """Инициализация с данными аудита"""
         self.data = data
     
     def escape_markdown(self, text):
-        """Экранирует специальные символы Markdown"""
         if text is None:
             return ""
-        # Экранирование специальных символов Markdown
         escape_chars = ['|', '_', '*', '`', '[', ']', '(', ')', '#', '+', '-', '.', '!']
         result = str(text)
         for char in escape_chars:
@@ -358,28 +328,23 @@ class ReportGenerator:
         return result
     
     def generate_markdown_report(self, md_path: str, dot_path: str, png_path: str):
-        """Генерирует детализированный отчёт в формате Markdown"""
         with open(md_path, 'w', encoding='utf-8') as f:
             f.write(f"# Audit Report: `{self.data['db_name']}`\n")
             f.write(f"*Generated: {datetime.now():%Y-%m-%d %H:%M:%S}*\n\n")
             
-            # Общая информация
             f.write("## General Info\n")
             f.write(f"- PostgreSQL: **{self.data['version']}**\n")
             f.write(f"- DB Size: **{self.data['db_size']}**\n")
             f.write(f"- Tables: **{len(self.data['tables'])}**\n\n")
             
-            # Таблицы и образцы данных
             f.write("## Tables & Sample Data\n")
             for tbl in self.data['tables']:
                 key = f"{tbl['schema']}.{tbl['name']}"
                 f.write(f"### {key}\n")
                 f.write(f"- Rows Estimate: `{tbl['row_estimate']}` | Size: `{tbl['size']}`\n")
                 
-                # Описание столбцов с метками PK/FK
                 f.write("#### Columns\n\n")
                 
-                # Корректная таблица с заголовком и разделителями
                 f.write("| Name | Type | Key | References |\n")
                 f.write("| ---- | ---- | --- | ---------- |\n")
                 
@@ -395,7 +360,6 @@ class ReportGenerator:
                         ref = col['references']
                         references = f"{ref['schema']}.{ref['table']}.{ref['column']}"
                     
-                    # Экранирование специальных символов Markdown
                     col_name = self.escape_markdown(col['column_name'])
                     data_type = self.escape_markdown(col['data_type'])
                     key_type = self.escape_markdown(key_type)
@@ -403,43 +367,34 @@ class ReportGenerator:
                     
                     f.write(f"| {col_name} | {data_type} | {key_type} | {references} |\n")
                 
-                # Образцы данных
                 f.write("\n#### Sample Data\n\n")
                 sample = self.data['samples'].get(key, [])
                 if sample:
                     cols = list(sample[0].keys())
                     
-                    # Корректный заголовок таблицы
                     header_row = " | ".join([self.escape_markdown(col) for col in cols])
                     f.write(f"| {header_row} |\n")
                     
-                    # Корректный разделитель
                     separator = " | ".join(["----" for _ in cols])
                     f.write(f"| {separator} |\n")
                     
-                    # Строки данных
                     for row in sample:
-                        # Экранирование всех значений
                         vals = [self.escape_markdown(row[c]) for c in cols]
-                        # Форматирование и запись строки
                         data_row = " | ".join(vals)
                         f.write(f"| {data_row} |\n")
                 else:
                     f.write("No data sample.\n")
                 f.write("\n")
             
-            # ER-диаграмма
             f.write("## ER Diagram\n")
             f.write(f"- DOT: `{dot_path}`  \n")
             f.write(f"- PNG: `{png_path}`  \n\n")
             
-            # Функции
             f.write("## Functions\n")
             for fn in self.data['functions']:
                 f.write(f"### {fn['schema']}.{fn['name']}({fn['args']}) -> {fn['return_type']}\n")
                 f.write("```sql\n" + fn['definition'] + "\n```\n\n")
             
-            # Триггеры
             f.write("## Triggers\n")
             if self.data['triggers']:
                 for trg in self.data['triggers']:
@@ -452,13 +407,7 @@ class ReportGenerator:
         print(f"[+] Markdown report generated: {md_path}")
 
 
-#############################################
-# Основной модуль
-#############################################
-
 def main():
-    """Основная функция программы"""
-    # Разбор аргументов командной строки
     parser = argparse.ArgumentParser(description="PostgreSQL Audit + ER Diagram")
     parser.add_argument("--conn", required=True, help="DB connection URI")
     parser.add_argument("--md", default=DEFAULT_MD_REPORT, help="Markdown report path")
@@ -467,23 +416,18 @@ def main():
     args = parser.parse_args()
     
     try:
-        # Подключение к БД
         db = DatabaseConnector(args.conn)
         
-        # Извлечение данных
         extractor = DataExtractor(db)
         data = extractor.get_all_data()
         
-        # Генерация ER-диаграммы
         erd_generator = ERDiagramGenerator(data['tables'], data['foreign_keys'])
         erd_generator.generate_er_dot(args.dot)
         erd_generator.render_png(args.dot, args.png)
         
-        # Генерация отчёта
         report_generator = ReportGenerator(data)
         report_generator.generate_markdown_report(args.md, args.dot, args.png)
         
-        # Закрытие подключения
         db.close()
         
         print(f"[+] All done! Report is available at {args.md}")
